@@ -18,7 +18,23 @@ WATCHED_REPOS = [
     ("home-assistant", "core"),
     ("filebrowser", "filebrowser"),
     ("immich-app", "immich"),
-    ("jellyfin", "jellyfin")
+    ("jellyfin", "jellyfin"),
+    ("open-webui", "open-webui"),
+    ("dani-garcia", "vaultwarden"),
+    ("BookStackApp", "BookStack"),
+    ("qdm12", "ddns-updater"),
+    ("nginx", "nginx"),
+    ("NginxProxyManager", "nginx-proxy-manager"),
+    ("wizarrrr", "wizarr"),
+    ("qbittorrent", "qBittorrent"),
+    ("Prowlarr", "Prowlarr"),
+    ("Sonarr", "Sonarr"),
+    ("Radarr", "Radarr"),
+    ("Lidarr", "Lidarr"),
+    ("drakkan", "sftpgo"),
+    ("tailscale", "tailscale"),
+    ("darenbooth", "sc_commodity_manager"),
+    ("darenbooth", "version_manager")
 ]
 OUTPUT_FILE = "/var/www/html/index.html"
 
@@ -46,16 +62,16 @@ def get_current_versions_from_bookstack():
             html_content = response.json().get('html', '')
             versions = {}
             
-            # 1. Strip HTML tags to get plain text so regex doesn't get confused
-            # This ensures that even if you bold the text inside the brackets, it still works.
+            # Strip HTML tags
             text = re.sub('<[^<]+?>', ' ', html_content)
             
-            # 2. Look for the pattern [appname: version]
+            # Look for [appname: version]
             matches = re.findall(r'\[(.*?)\]', text)
             
             for match in matches:
                 if ':' in match:
                     parts = match.split(':', 1)
+                    # We keep keys lower-case for consistent matching
                     app_name = parts[0].strip().lower()
                     version_val = parts[1].strip()
                     versions[app_name] = version_val
@@ -67,6 +83,38 @@ def get_current_versions_from_bookstack():
     except Exception as e:
         print(f"Failed to connect to BookStack: {e}")
         return {}
+
+def get_latest_github_info(owner, repo, headers):
+    """Fetches latest version, falling back to tags if no formal release exists."""
+    release_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+    try:
+        response = requests.get(release_url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "version": data.get("tag_name", "N/A"),
+                "date": data.get("published_at", "")[:10],
+                "url": data.get("html_url", "#")
+            }
+        
+        # Fallback to Tags API
+        elif response.status_code == 404:
+            tags_url = f"https://api.github.com/repos/{owner}/{repo}/tags"
+            tags_response = requests.get(tags_url, headers=headers, timeout=10)
+            if tags_response.status_code == 200:
+                tags_data = tags_response.json()
+                if tags_data:
+                    tag_name = tags_data[0].get('name', 'N/A')
+                    return {
+                        "version": tag_name,
+                        "date": "Tag (Recent)", 
+                        "url": f"https://github.com/{owner}/{repo}/tags"
+                    }
+        
+        return {"version": "N/A", "date": "N/A", "url": "#"}
+    except Exception as e:
+        print(f"Request error for {repo}: {e}")
+        return {"version": "Error", "date": "Error", "url": "#"}
 
 def fetch_data():
     """Gathers data from GitHub and compares it with BookStack."""
@@ -80,20 +128,13 @@ def fetch_data():
     }
 
     for owner, repo in WATCHED_REPOS:
-        url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-        response = requests.get(url, headers=gh_headers)
-
-        latest_ver = "N/A"
-        rel_date = "N/A"
-        rel_url = "#"
+        info = get_latest_github_info(owner, repo, gh_headers)
         
-        if response.status_code == 200:
-            data = response.json()
-            latest_ver = data.get("tag_name", "N/A")
-            rel_date = data.get("published_at", "")[:10]
-            rel_url = data.get("html_url", "#")
+        latest_ver = info["version"]
+        rel_date = info["date"]
+        rel_url = info["url"]
 
-        # Match against BookStack data
+        # FIXED: Exact match only to prevent "nginx" matching "nginx-proxy-manager"
         my_version = current_vers.get(repo.lower(), "Unknown")
         
         # Determine status
@@ -136,6 +177,7 @@ def generate_html(releases):
             .status-unknown {{ color: #6c757d; font-style: italic; }}
             a {{ color: #007bff; text-decoration: none; }}
             a:hover {{ text-decoration: underline; }}
+            code {{ background: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-family: monospace; }}
         </style>
     </head>
     <body>
