@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- CONFIGURATION ---
+DASHBOARD_VERSION = "v0.5"  # Update this when pushing new images
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 BOOKSTACK_URL = os.getenv("BOOKSTACK_URL", "").rstrip('/')
 BS_ID = os.getenv("BOOKSTACK_TOKEN_ID")
@@ -71,7 +72,6 @@ def get_current_versions_from_bookstack():
             for match in matches:
                 if ':' in match:
                     parts = match.split(':', 1)
-                    # We keep keys lower-case for consistent matching
                     app_name = parts[0].strip().lower()
                     version_val = parts[1].strip()
                     versions[app_name] = version_val
@@ -134,7 +134,7 @@ def fetch_data():
         rel_date = info["date"]
         rel_url = info["url"]
 
-        # FIXED: Exact match only to prevent "nginx" matching "nginx-proxy-manager"
+        # Exact match only
         my_version = current_vers.get(repo.lower(), "Unknown")
         
         # Determine status
@@ -157,32 +157,36 @@ def fetch_data():
             "status_class": status_class,
             "status_text": status_text
         })
+    
     return results
 
-def generate_html(releases):
+def generate_html(releases, app_version):
     html_template = """
     <html>
     <head>
-        <title>Service Version Dashboard</title>
+        <title>Version Monitor {app_version}</title>
         <style>
-            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; padding: 40px; color: #333; }}
-            .container {{ max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-            h1 {{ border-bottom: 2px solid #007bff; padding-bottom: 10px; color: #007bff; }}
+            /* DARK MODE THEME */
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; padding: 40px; color: #e0e0e0; }}
+            .container {{ max-width: 1000px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }}
+            h1 {{ border-bottom: 2px solid #3a86ff; padding-bottom: 10px; color: #3a86ff; }}
             table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
-            th, td {{ padding: 15px; text-align: left; border-bottom: 1px solid #eee; }}
-            th {{ background-color: #f8f9fa; color: #555; text-transform: uppercase; font-size: 0.85rem; }}
-            tr:hover {{ background-color: #fcfcfc; }}
+            th, td {{ padding: 15px; text-align: left; border-bottom: 1px solid #333; }}
+            th {{ background-color: #2a2a2a; color: #b0b0b0; text-transform: uppercase; font-size: 0.85rem; }}
+            tr:hover {{ background-color: #252525; }}
+            
             .status-ok {{ color: #28a745; font-weight: bold; }}
-            .status-update {{ background: #fff3cd; color: #856404; font-weight: bold; padding: 4px 8px; border-radius: 4px; }}
-            .status-unknown {{ color: #6c757d; font-style: italic; }}
-            a {{ color: #007bff; text-decoration: none; }}
+            .status-update {{ background: rgba(255, 193, 7, 0.15); color: #ffc107; font-weight: bold; padding: 4px 8px; border-radius: 4px; }}
+            .status-unknown {{ color: #a0a0a0; font-style: italic; }}
+            
+            a {{ color: #3a86ff; text-decoration: none; }}
             a:hover {{ text-decoration: underline; }}
-            code {{ background: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-family: monospace; }}
+            code {{ background: #2a2a2a; color: #e0e0e0; padding: 2px 5px; border-radius: 3px; font-family: monospace; border: 1px solid #333; }}
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>System Version Monitor</h1>
+            <h1>Version Monitor {app_version}</h1>
             <table>
                 <tr>
                     <th>Service</th>
@@ -211,10 +215,10 @@ def generate_html(releases):
         """
 
     with open(OUTPUT_FILE, "w") as f:
-        f.write(html_template.format(rows=rows))
+        f.write(html_template.format(app_version=app_version, rows=rows))
 
 if __name__ == "__main__":
-    print("Fetching data from GitHub and BookStack...")
+    print(f"Fetching data from GitHub and BookStack for {DASHBOARD_VERSION}...")
     data = fetch_data()
-    generate_html(data)
+    generate_html(data, DASHBOARD_VERSION)
     print(f"Dashboard updated: {OUTPUT_FILE}")
