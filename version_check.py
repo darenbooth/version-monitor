@@ -1,224 +1,229 @@
 import os
 import requests
-import re
-from dotenv import load_dotenv
+import sqlite3
+import markdown
+from flask import Flask, render_template_string, request, redirect
 
-# Load environment variables
-load_dotenv()
-
-# --- CONFIGURATION ---
-DASHBOARD_VERSION = "v0.5"  # Update this when pushing new images
+app = Flask(__name__)
+# Database must live in the volume-mapped folder
+DB_PATH = "/app/data/monitor.db"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-BOOKSTACK_URL = os.getenv("BOOKSTACK_URL", "").rstrip('/')
-BS_ID = os.getenv("BOOKSTACK_TOKEN_ID")
-BS_SECRET = os.getenv("BOOKSTACK_TOKEN_SECRET")
-BS_PAGE_ID = os.getenv("BOOKSTACK_PAGE_ID")
+DASHBOARD_VERSION = "v0.6"
 
-WATCHED_REPOS = [
-    ("home-assistant", "operating-system"),
-    ("home-assistant", "core"),
-    ("filebrowser", "filebrowser"),
-    ("immich-app", "immich"),
-    ("jellyfin", "jellyfin"),
-    ("open-webui", "open-webui"),
-    ("dani-garcia", "vaultwarden"),
-    ("BookStackApp", "BookStack"),
-    ("qdm12", "ddns-updater"),
-    ("nginx", "nginx"),
-    ("NginxProxyManager", "nginx-proxy-manager"),
-    ("wizarrrr", "wizarr"),
-    ("qbittorrent", "qBittorrent"),
-    ("Prowlarr", "Prowlarr"),
-    ("Sonarr", "Sonarr"),
-    ("Radarr", "Radarr"),
-    ("Lidarr", "Lidarr"),
-    ("drakkan", "sftpgo"),
-    ("tailscale", "tailscale"),
-    ("darenbooth", "sc_commodity_manager"),
-    ("darenbooth", "version_manager")
-]
-OUTPUT_FILE = "/var/www/html/index.html"
-
-# Validation
-if not GITHUB_TOKEN:
-    print("Error: GITHUB_TOKEN not found.")
-    exit(1)
-
-def get_current_versions_from_bookstack():
-    """Fetches and parses the BookStack page for current versions using [app:ver] markers."""
-    if not all([BOOKSTACK_URL, BS_ID, BS_SECRET, BS_PAGE_ID]):
-        print("BookStack configuration missing. Skipping current version check.")
-        return {}
-
-    url = f"{BOOKSTACK_URL}/api/pages/{BS_PAGE_ID}"
-    headers = {
-        "Authorization": f"Token {BS_ID}:{BS_SECRET}",
-        "Accept": "application/json",
-        "User-Agent": "VersionDashboard-App"
-    }
+# --- DATABASE SETUP ---
+def init_db():
+    """Initializes the SQLite database and injects the default system repo."""
+    if not os.path.exists("/app/data"):
+        os.makedirs("/app/data")
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    # Create the table
+    c.execute('''CREATE TABLE IF NOT EXISTS repos 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT, repo TEXT, current_ver TEXT, notes TEXT)''')
     
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            html_content = response.json().get('html', '')
-            versions = {}
-            
-            # Strip HTML tags
-            text = re.sub('<[^<]+?>', ' ', html_content)
-            
-            # Look for [appname: version]
-            matches = re.findall(r'\[(.*?)\]', text)
-            
-            for match in matches:
-                if ':' in match:
-                    parts = match.split(':', 1)
-                    app_name = parts[0].strip().lower()
-                    version_val = parts[1].strip()
-                    versions[app_name] = version_val
-            
-            return versions
-        else:
-            print(f"BookStack API Error: {response.status_code}")
-            return {}
-    except Exception as e:
-        print(f"Failed to connect to BookStack: {e}")
-        return {}
+    # Check if the system repo exists, if not, add it with your custom note
+    c.execute("SELECT count(*) FROM repos WHERE repo = 'version_manager'")
+    if c.fetchone()[0] == 0:
+        default_note = "** To Update:\r\n`cd path/to/directory`  \r\n`docker compose pull && docker compose up -d`"
+        c.execute("INSERT INTO repos (owner, repo, current_ver, notes) VALUES (?, ?, ?, ?)",
+                  ("darenbooth", "version_manager", DASHBOARD_VERSION, default_note))
+    conn.commit()
+    conn.close()
 
-def get_latest_github_info(owner, repo, headers):
-    """Fetches latest version, falling back to tags if no formal release exists."""
-    release_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+def get_latest_github_info(owner, repo):
+    """Fetches the latest version from GitHub API."""
+    if not GITHUB_TOKEN:
+        return "Missing Token", "N/A"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
     try:
-        response = requests.get(release_url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            return {
-                "version": data.get("tag_name", "N/A"),
-                "date": data.get("published_at", "")[:10],
-                "url": data.get("html_url", "#")
-            }
-        
-        # Fallback to Tags API
-        elif response.status_code == 404:
-            tags_url = f"https://api.github.com/repos/{owner}/{repo}/tags"
-            tags_response = requests.get(tags_url, headers=headers, timeout=10)
-            if tags_response.status_code == 200:
-                tags_data = tags_response.json()
-                if tags_data:
-                    tag_name = tags_data[0].get('name', 'N/A')
-                    return {
-                        "version": tag_name,
-                        "date": "Tag (Recent)", 
-                        "url": f"https://github.com/{owner}/{repo}/tags"
-                    }
-        
-        return {"version": "N/A", "date": "N/A", "url": "#"}
-    except Exception as e:
-        print(f"Request error for {repo}: {e}")
-        return {"version": "Error", "date": "Error", "url": "#"}
+        # 1. Try Releases
+        r = requests.get(f"https://api.github.com/repos/{owner}/{repo}/releases/latest", headers=headers, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            return data.get("tag_name", "N/A"), data.get("published_at", "")[:10]
+        # 2. Fallback to Tags
+        elif r.status_code == 404:
+            tags_r = requests.get(f"https://api.github.com/repos/{owner}/{repo}/tags", headers=headers, timeout=5)
+            if tags_r.status_code == 200 and tags_r.json():
+                return tags_r.json()[0].get('name', 'N/A'), "Tag (Recent)"
+    except:
+        pass
+    return "N/A", "N/A"
 
-def fetch_data():
-    """Gathers data from GitHub and compares it with BookStack."""
-    current_vers = get_current_versions_from_bookstack()
-    results = []
+# --- ROUTES ---
+@app.route('/')
+def index():
+    """Main dashboard view."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    # Sort to keep the system repo at the very top
+    c.execute("SELECT * FROM repos ORDER BY (repo = 'version_manager') DESC, repo ASC")
+    rows = c.fetchall()
     
-    gh_headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "VersionDashboard-App"
-    }
-
-    for owner, repo in WATCHED_REPOS:
-        info = get_latest_github_info(owner, repo, gh_headers)
+    services = []
+    for row in rows:
+        rid, owner, repo, current, notes = row
+        latest, date = get_latest_github_info(owner, repo)
         
-        latest_ver = info["version"]
-        rel_date = info["date"]
-        rel_url = info["url"]
-
-        # Exact match only
-        my_version = current_vers.get(repo.lower(), "Unknown")
+        # Check if this is the system repo
+        is_system = (repo == "version_manager" and owner == "darenbooth")
         
-        # Determine status
-        if my_version == "Unknown":
-            status_class = "status-unknown"
-            status_text = "Not Documented"
-        elif latest_ver == my_version:
-            status_class = "status-ok"
-            status_text = "Up to Date"
-        else:
-            status_class = "status-update"
-            status_text = "Update Available"
+        # Force the system repo to show the hardcoded DASHBOARD_VERSION
+        display_current = DASHBOARD_VERSION if is_system else (current or "Unknown")
+        
+        status = "update"
+        if latest == "N/A": status = "unknown"
+        elif display_current == latest: status = "ok"
 
-        results.append({
-            "name": repo,
-            "latest": latest_ver,
-            "current": my_version,
-            "date": rel_date,
-            "url": rel_url,
-            "status_class": status_class,
-            "status_text": status_text
+        services.append({
+            "id": rid, "owner": owner, "name": repo, "current": display_current,
+            "latest": latest, "date": date, "notes": markdown.markdown(notes or ""),
+            "raw_notes": notes or "", "status": status, "is_system": is_system
         })
-    
-    return results
+    conn.close()
+    return render_template_string(HTML_TEMPLATE, services=services, version=DASHBOARD_VERSION)
 
-def generate_html(releases, app_version):
-    html_template = """
-    <html>
-    <head>
-        <title>Version Monitor {app_version}</title>
-        <style>
-            /* DARK MODE THEME */
-            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; padding: 40px; color: #e0e0e0; }}
-            .container {{ max-width: 1000px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }}
-            h1 {{ border-bottom: 2px solid #3a86ff; padding-bottom: 10px; color: #3a86ff; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
-            th, td {{ padding: 15px; text-align: left; border-bottom: 1px solid #333; }}
-            th {{ background-color: #2a2a2a; color: #b0b0b0; text-transform: uppercase; font-size: 0.85rem; }}
-            tr:hover {{ background-color: #252525; }}
-            
-            .status-ok {{ color: #28a745; font-weight: bold; }}
-            .status-update {{ background: rgba(255, 193, 7, 0.15); color: #ffc107; font-weight: bold; padding: 4px 8px; border-radius: 4px; }}
-            .status-unknown {{ color: #a0a0a0; font-style: italic; }}
-            
-            a {{ color: #3a86ff; text-decoration: none; }}
-            a:hover {{ text-decoration: underline; }}
-            code {{ background: #2a2a2a; color: #e0e0e0; padding: 2px 5px; border-radius: 3px; font-family: monospace; border: 1px solid #333; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>Version Monitor {app_version}</h1>
-            <table>
+@app.route('/add', methods=['POST'])
+def add():
+    owner = request.form['owner'].strip()
+    repo = request.form['repo'].strip()
+    current = request.form['current'].strip()
+    if owner and repo:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("INSERT INTO repos (owner, repo, current_ver, notes) VALUES (?, ?, ?, '')", (owner, repo, current))
+        conn.commit()
+        conn.close()
+    return redirect('/')
+
+@app.route('/update_notes', methods=['POST'])
+def update_notes():
+    rid = request.form['id']
+    notes = request.form['notes'].strip()
+    conn = sqlite3.connect(DB_PATH)
+    # Check if a 'current' version was actually sent (it's hidden for system repo)
+    if 'current' in request.form:
+        conn.execute("UPDATE repos SET notes = ?, current_ver = ? WHERE id = ?", (notes, request.form['current'], rid))
+    else:
+        conn.execute("UPDATE repos SET notes = ? WHERE id = ?", (notes, rid))
+    conn.commit()
+    conn.close()
+    return redirect('/')
+
+@app.route('/delete/<int:repo_id>', methods=['POST'])
+def delete(repo_id):
+    conn = sqlite3.connect(DB_PATH)
+    # Security: Prevent deletion of the system repo
+    conn.execute("DELETE FROM repos WHERE id = ? AND repo != 'version_manager'", (repo_id,))
+    conn.commit()
+    conn.close()
+    return redirect('/')
+
+# --- FULL HTML TEMPLATE ---
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Version Monitor {{ version }}</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #e0e0e0; padding: 20px; }
+        .container { max-width: 1000px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        h1 { border-bottom: 2px solid #32CD32; padding-bottom: 10px; color: #32CD32; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; border-bottom: 1px solid #333; text-align: left; }
+        th { background-color: #2a2a2a; color: #b0b0b0; text-transform: uppercase; font-size: 0.85rem; }
+        tr:hover { background-color: #252525; }
+        .status-ok { color: #32CD32; font-weight: bold; }
+        .status-update { color: #ffc107; font-weight: bold; }
+        .status-unknown { color: #888; font-style: italic; }
+        input, textarea { background: #2a2a2a; color: #e0e0e0; border: 1px solid #444; padding: 8px; border-radius: 4px; width: 100%; box-sizing: border-box; }
+        .btn { background: #3a86ff; color: white; border: none; padding: 8px 12px; cursor: pointer; border-radius: 4px; }
+        .btn:hover { background: #0056b3; }
+        .btn-delete { background: #dc3545; }
+        .btn-delete:hover { background: #a71d2a; }
+        .notes-row { display: none; background: #252525; }
+        .notes-row td { white-space: normal; padding: 20px; }
+        .markdown-body { font-size: 0.9em; color: #b0b0b0; line-height: 1.6; }
+        .markdown-body code { background: #333; padding: 2px 4px; border-radius: 3px; font-family: monospace; }
+        .markdown-body p { margin: 8px 0; }
+    </style>
+    <script>
+        function toggleNotes(id) {
+            var x = document.getElementById("notes-" + id);
+            x.style.display = (x.style.display === "none") ? "table-row" : "none";
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>Version Monitor {{ version }}</h1>
+        
+        <form action="/add" method="post" style="margin-bottom: 20px; display: flex; gap: 10px;">
+            <input type="text" name="owner" placeholder="Owner (e.g. home-assistant)" required>
+            <input type="text" name="repo" placeholder="Repo Name (e.g. core)" required>
+            <input type="text" name="current" placeholder="Current Version">
+            <button type="submit" class="btn">Add Repo</button>
+        </form>
+
+        <table>
+            <thead>
                 <tr>
                     <th>Service</th>
-                    <th>Current (BookStack)</th>
-                    <th>Latest (GitHub)</th>
+                    <th>Current</th>
+                    <th>Latest</th>
                     <th>Release Date</th>
                     <th>Status</th>
                 </tr>
-                {rows}
-            </table>
-        </div>
-    </body>
-    </html>
-    """
+            </thead>
+            <tbody>
+                {% for s in services %}
+                <tr>
+                    <td>{{ s.owner }}/{{ s.name }}</td>
+                    <td><code>{{ s.current }}</code></td>
+                    <td><code>{{ s.latest }}</code></td>
+                    <td>{{ s.date }}</td>
+                    <td class="status-{{ s.status }}">
+                        {{ s.status.upper() }}
+                        <button class="btn" onclick="toggleNotes('{{ s.id }}')" style="padding: 2px 6px; font-size: 0.8em; margin-left: 10px;">Notes</button>
+                    </td>
+                </tr>
+                <tr id="notes-{{ s.id }}" class="notes-row">
+                    <td colspan="5">
+                        <div style="display:flex; gap: 30px;">
+                            <div style="flex:1;">
+                                <strong>Preview:</strong><br><br>
+                                <div class="markdown-body">{{ s.notes|safe }}</div>
+                            </div>
+                            
+                            <form action="/update_notes" method="post" style="flex:1; display: flex; flex-direction: column; gap: 10px;">
+                                <input type="hidden" name="id" value="{{ s.id }}">
+                                {% if not s.is_system %}
+                                    <label>Current Version:</label>
+                                    <input type="text" name="current" value="{{ s.current }}">
+                                {% else %}
+                                    <p style="font-size: 0.85em; color: #32CD32;">✔ System Managed Version</p>
+                                {% endif %}
+                                <label>Notes (Markdown):</label>
+                                <textarea name="notes" rows="6">{{ s.raw_notes }}</textarea>
+                                <button type="submit" class="btn">Save Changes</button>
+                            </form>
+                            
+                            {% if not s.is_system %}
+                            <form action="/delete/{{ s.id }}" method="post" onsubmit="return confirm('Delete this repository?');">
+                                <button type="submit" class="btn btn-delete">DELETE</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
+"""
 
-    rows = ""
-    for r in releases:
-        rows += f"""
-        <tr>
-            <td><a href="{r['url']}" target="_blank">{r['name']}</a></td>
-            <td><code>{r['current']}</code></td>
-            <td><code>{r['latest']}</code></td>
-            <td>{r['date']}</td>
-            <td><span class="{r['status_class']}">{r['status_text']}</span></td>
-        </tr>
-        """
-
-    with open(OUTPUT_FILE, "w") as f:
-        f.write(html_template.format(app_version=app_version, rows=rows))
-
-if __name__ == "__main__":
-    print(f"Fetching data from GitHub and BookStack for {DASHBOARD_VERSION}...")
-    data = fetch_data()
-    generate_html(data, DASHBOARD_VERSION)
-    print(f"Dashboard updated: {OUTPUT_FILE}")
+if __name__ == '__main__':
+    init_db()
+    app.run(host='0.0.0.0', port=80)

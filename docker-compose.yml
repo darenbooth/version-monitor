@@ -1,16 +1,11 @@
 services:
   version-monitor:
-    build: .
+    image: darenbooth/version-monitor:latest
     container_name: version-monitor
-    restart: always
     ports:
-      - "3339:80"
-    # We pass the .env file into the container
-    env_file:
-      - .env
-    # Optional: ensure logs don't grow forever
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - "8136:80"
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+    volumes:
+      - ./monitor_data:/app/data  # This keeps the SQLite database safe on the host
+    restart: always
