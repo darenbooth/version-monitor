@@ -4,8 +4,8 @@ services:
     container_name: version-monitor
     ports:
       - "8136:80"
-    environment:
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
+    env_file:
+      - .env
     volumes:
-      - ./monitor_data:/app/data  # This keeps the SQLite database safe on the host
+      - ./monitor_data:/app/data
     restart: always

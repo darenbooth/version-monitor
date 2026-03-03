@@ -8,7 +8,7 @@ app = Flask(__name__)
 # Database must live in the volume-mapped folder
 DB_PATH = "/app/data/monitor.db"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-DASHBOARD_VERSION = "v0.6"
+DASHBOARD_VERSION = "v1.0"
 
 # --- DATABASE SETUP ---
 def init_db():
@@ -24,7 +24,7 @@ def init_db():
     # Check if the system repo exists, if not, add it with your custom note
     c.execute("SELECT count(*) FROM repos WHERE repo = 'version_manager'")
     if c.fetchone()[0] == 0:
-        default_note = "** To Update:\r\n`cd path/to/directory`  \r\n`docker compose pull && docker compose up -d`"
+        default_note = "To Update:\r\n`cd path/to/directory`  \r\n`docker compose pull && docker compose up -d`"
         c.execute("INSERT INTO repos (owner, repo, current_ver, notes) VALUES (?, ?, ?, ?)",
                   ("darenbooth", "version_manager", DASHBOARD_VERSION, default_note))
     conn.commit()
