@@ -34,7 +34,7 @@ To prevent being rate-limited, this app requires a GitHub Personal Access Token 
 
 1. Create a file named .env in your project folder. This keeps your secrets safe and out of the main configuration. Paste this into .env file.
 
-`GITHUB_TOKEN=your_token_here_starting_with_ghp_`
+`GITHUB_TOKEN=your_token_here`
 
 ## 🐳 Step 3: Deploy with Docker Compose
 
