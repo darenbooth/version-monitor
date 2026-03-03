@@ -8,7 +8,7 @@ app = Flask(__name__)
 # Database must live in the volume-mapped folder
 DB_PATH = "/app/data/monitor.db"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-DASHBOARD_VERSION = "v1.0"
+DASHBOARD_VERSION = "v1.1"
 
 # --- DATABASE SETUP ---
 def init_db():
@@ -22,11 +22,11 @@ def init_db():
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT, repo TEXT, current_ver TEXT, notes TEXT)''')
     
     # Check if the system repo exists, if not, add it with your custom note
-    c.execute("SELECT count(*) FROM repos WHERE repo = 'version_manager'")
+    c.execute("SELECT count(*) FROM repos WHERE repo = 'version-monitor'")
     if c.fetchone()[0] == 0:
-        default_note = "To Update:\r\n`cd path/to/directory`  \r\n`docker compose pull && docker compose up -d`"
+        default_note = "## To Find Version:\r\n\r\nThe version is proudly displayed at the top of the page.\r\n\r\n## To Update:\r\n\r\n`cd path/to/directory`\r\n\r\n`docker compose pull && docker compose up -d`\r\n\r\n## Donation:\r\n\r\nIf you find this container useful, please consider donating a couple of dollars to me here\r\n\r\n<https://www.paypal.com/donate/?hosted_button_id=3TL69W8RM7CYEI>"
         c.execute("INSERT INTO repos (owner, repo, current_ver, notes) VALUES (?, ?, ?, ?)",
-                  ("darenbooth", "version_manager", DASHBOARD_VERSION, default_note))
+                  ("darenbooth", "version-monitor", DASHBOARD_VERSION, default_note))
     conn.commit()
     conn.close()
 
@@ -57,7 +57,7 @@ def index():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     # Sort to keep the system repo at the very top
-    c.execute("SELECT * FROM repos ORDER BY (repo = 'version_manager') DESC, repo ASC")
+    c.execute("SELECT * FROM repos ORDER BY (repo = 'version-monitor') DESC, repo ASC")
     rows = c.fetchall()
     
     services = []
@@ -66,7 +66,7 @@ def index():
         latest, date = get_latest_github_info(owner, repo)
         
         # Check if this is the system repo
-        is_system = (repo == "version_manager" and owner == "darenbooth")
+        is_system = (repo == "version-monitor" and owner == "darenbooth")
         
         # Force the system repo to show the hardcoded DASHBOARD_VERSION
         display_current = DASHBOARD_VERSION if is_system else (current or "Unknown")
