@@ -11,6 +11,9 @@ RUN mkdir -p /app/data
 # Copy the application code
 COPY version_check.py .
 
+# Copy the logo file into the /app directory
+COPY logo.png .
+
 # Expose the Flask port
 EXPOSE 80
 

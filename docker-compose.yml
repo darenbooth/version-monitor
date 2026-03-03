@@ -1,6 +1,6 @@
 services:
   version-monitor:
-    image: darenbooth/version-monitor:latest
+    image: darenbooth/version-monitor:v0.X
     container_name: version-monitor
     ports:
       - "8136:80"

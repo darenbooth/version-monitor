@@ -2,13 +2,13 @@ import os
 import requests
 import sqlite3
 import markdown
-from flask import Flask, render_template_string, request, redirect
+from flask import Flask, render_template_string, request, redirect, send_file
 
 app = Flask(__name__)
 # Database must live in the volume-mapped folder
 DB_PATH = "/app/data/monitor.db"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-DASHBOARD_VERSION = "v1.1"
+DASHBOARD_VERSION = "v1.2"
 
 # --- DATABASE SETUP ---
 def init_db():
@@ -24,7 +24,7 @@ def init_db():
     # Check if the system repo exists, if not, add it with your custom note
     c.execute("SELECT count(*) FROM repos WHERE repo = 'version-monitor'")
     if c.fetchone()[0] == 0:
-        default_note = "## To Find Version:\r\n\r\nThe version is proudly displayed at the top of the page.\r\n\r\n## To Update:\r\n\r\n`cd path/to/directory`\r\n\r\n`docker compose pull && docker compose up -d`\r\n\r\n## Donation:\r\n\r\nIf you find this container useful, please consider donating a couple of dollars to me here\r\n\r\n<https://www.paypal.com/donate/?hosted_button_id=3TL69W8RM7CYEI>"
+        default_note = "## To Find Version:\r\n\r\nThe version is proudly displayed at the top of the page.\r\n\r\n## To Update:\r\n\r\n`cd path/to/directory`\r\n\r\n`docker compose pull && docker compose up -d`\r\n\r\n## Donation:\r\n\r\nIf you find this container useful, please consider donating a couple of dollars to me here:\r\n\r\n<https://www.paypal.me/DarenBooth?locale.x=en_US&country.x=US>"
         c.execute("INSERT INTO repos (owner, repo, current_ver, notes) VALUES (?, ?, ?, ?)",
                   ("darenbooth", "version-monitor", DASHBOARD_VERSION, default_note))
     conn.commit()
@@ -51,6 +51,11 @@ def get_latest_github_info(owner, repo):
     return "N/A", "N/A"
 
 # --- ROUTES ---
+@app.route('/logo.png')
+def serve_logo():
+    """Route to serve the logo.png image from the /app directory."""
+    return send_file('logo.png', mimetype='image/png')
+
 @app.route('/')
 def index():
     """Main dashboard view."""
@@ -125,10 +130,18 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <title>Version Monitor {{ version }}</title>
+    
+    <link rel="icon" type="image/png" href="/logo.png">
+    
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #e0e0e0; padding: 20px; }
         .container { max-width: 1000px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        h1 { border-bottom: 2px solid #32CD32; padding-bottom: 10px; color: #32CD32; }
+        
+        /* Updated Title Flexbox */
+        h1 { border-bottom: 2px solid #32CD32; padding-bottom: 10px; color: #32CD32; display: flex; align-items: center; gap: 15px;}
+        /* UPDATED: Logo is now 2x the height of the text */
+        h1 img { height: 2em; width: auto; }
+
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
         th, td { padding: 12px; border-bottom: 1px solid #333; text-align: left; }
         th { background-color: #2a2a2a; color: #b0b0b0; text-transform: uppercase; font-size: 0.85rem; }
@@ -156,7 +169,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>Version Monitor {{ version }}</h1>
+        <h1><img src="/logo.png" alt="VM Logo"> Version Monitor {{ version }}</h1>
         
         <form action="/add" method="post" style="margin-bottom: 20px; display: flex; gap: 10px;">
             <input type="text" name="owner" placeholder="Owner (e.g. home-assistant)" required>
