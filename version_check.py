@@ -24,7 +24,7 @@ def init_db():
     # Check if the system repo exists, if not, add it with your custom note
     c.execute("SELECT count(*) FROM repos WHERE repo = 'version-monitor'")
     if c.fetchone()[0] == 0:
-        default_note = "## To Find Version:\r\n\r\nThe version is proudly displayed at the top of the page.\r\n\r\n## To Update:\r\n\r\n`cd path/to/directory`\r\n\r\n`docker compose pull && docker compose up -d`\r\n\r\n## Donation:\r\n\r\nIf you find this container useful, please consider donating a couple of dollars to me here:\r\n\r\n<https://www.paypal.me/DarenBooth?locale.x=en_US&country.x=US>"
+        default_note = "## To Find Version:\r\n\r\nThe version is proudly displayed at the top of the page.\r\n\r\n## To Update:\r\n\r\n`cd path/to/directory`\r\n\r\n`docker compose pull && docker compose up -d`\r\n\r\n## Donation:\r\n\r\nIf you find this container useful, please consider donating a couple of dollars to me here:\r\n\r\n<https://www.paypal.com/donate?hosted_button_id=3TL69W8RM7CYE>"
         c.execute("INSERT INTO repos (owner, repo, current_ver, notes) VALUES (?, ?, ?, ?)",
                   ("darenbooth", "version-monitor", DASHBOARD_VERSION, default_note))
     conn.commit()
